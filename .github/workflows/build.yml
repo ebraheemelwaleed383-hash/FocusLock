@@ -2,6 +2,10 @@ name: Build APK
 on: [push, workflow_dispatch]
 permissions:
   contents: write
+env:
+  FL_STORE_PASS: ${{ secrets.FL_STORE_PASS }}
+  FL_KEY_ALIAS: ${{ secrets.FL_KEY_ALIAS }}
+  FL_KEY_PASS: ${{ secrets.FL_KEY_PASS }}
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -9,6 +13,14 @@ jobs:
       - uses: actions/checkout@v4
       - name: Unzip project
         run: if [ -f FocusLock.zip ]; then unzip -oq FocusLock.zip; fi
+      - name: Optional private keystore
+        env:
+          KS: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KS" ]; then
+            echo "$KS" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "FL_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          fi
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -16,13 +28,18 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.7"
-      - run: gradle assembleDebug
+      - name: Build (release, fallback to debug)
         working-directory: FocusLock
-      - name: Prepare APK
         run: |
-          VER=$(grep -oP 'versionName = "\K[^"]+' FocusLock/app/build.gradle.kts)
-          echo "VER=$VER" >> "$GITHUB_ENV"
-          cp FocusLock/app/build/outputs/apk/debug/app-debug.apk StayFocused.apk
+          if gradle assembleRelease; then
+            cp app/build/outputs/apk/release/app-release.apk ../StayFocused.apk
+          else
+            echo "Release build failed, falling back to debug"
+            gradle assembleDebug
+            cp app/build/outputs/apk/debug/app-debug.apk ../StayFocused.apk
+          fi
+      - name: Read version
+        run: echo "VER=$(grep -oP 'versionName = "\K[^"]+' FocusLock/app/build.gradle.kts)" >> "$GITHUB_ENV"
       - uses: actions/upload-artifact@v4
         with:
           name: FocusLock-apk
