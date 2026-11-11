@@ -28,22 +28,26 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.7"
-      - name: Build (release, fallback to debug)
+      - name: Build both editions (release, fallback to debug)
         working-directory: FocusLock
         run: |
-          if gradle assembleRelease; then
-            cp app/build/outputs/apk/release/app-release.apk ../StayFocused.apk
+          if gradle assembleLiteRelease assembleFullRelease; then
+            cp app/build/outputs/apk/lite/release/app-lite-release.apk ../StayFocused.apk
+            cp app/build/outputs/apk/full/release/app-full-release.apk ../StayFocused-Full.apk
           else
             echo "Release build failed, falling back to debug"
-            gradle assembleDebug
-            cp app/build/outputs/apk/debug/app-debug.apk ../StayFocused.apk
+            gradle assembleLiteDebug assembleFullDebug
+            cp app/build/outputs/apk/lite/debug/app-lite-debug.apk ../StayFocused.apk
+            cp app/build/outputs/apk/full/debug/app-full-debug.apk ../StayFocused-Full.apk
           fi
       - name: Read version
         run: echo "VER=$(grep -oP 'versionName = "\K[^"]+' FocusLock/app/build.gradle.kts)" >> "$GITHUB_ENV"
       - uses: actions/upload-artifact@v4
         with:
           name: FocusLock-apk
-          path: StayFocused.apk
+          path: |
+            StayFocused.apk
+            StayFocused-Full.apk
       - name: Publish release for new versions
         env:
           GH_TOKEN: ${{ github.token }}
@@ -51,4 +55,4 @@ jobs:
         run: |
           NOTES=FocusLock/RELEASE_NOTES.txt
           [ -f "$NOTES" ] || echo "Stay focused $VER" > "$NOTES"
-          gh release view "v$VER" >/dev/null 2>&1 || gh release create "v$VER" StayFocused.apk --title "Stay focused $VER" --notes-file "$NOTES" --latest
+          gh release view "v$VER" >/dev/null 2>&1 || gh release create "v$VER" StayFocused-Full.apk StayFocused.apk --title "Stay focused $VER" --notes-file "$NOTES" --latest
