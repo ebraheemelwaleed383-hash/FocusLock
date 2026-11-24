@@ -54,5 +54,5 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           NOTES=FocusLock/RELEASE_NOTES.txt
-          [ -f "$NOTES" ] || echo "Stay focused $VER" > "$NOTES"
-          gh release view "v$VER" >/dev/null 2>&1 || gh release create "v$VER" StayFocused-Full.apk StayFocused.apk --title "Stay focused $VER" --notes-file "$NOTES" --latest
+          [ -f "$NOTES" ] || echo "Vigil $VER" > "$NOTES"
+          gh release view "v$VER" >/dev/null 2>&1 || gh release create "v$VER" StayFocused-Full.apk StayFocused.apk --title "Vigil $VER" --notes-file "$NOTES" --latest
