@@ -50,7 +50,7 @@ jobs:
             --old-signer --ks FocusLock/focuslock.jks --ks-pass pass:focuslock --ks-key-alias focuslock --key-pass pass:focuslock \
             --new-signer --ks "$FL_KEYSTORE" --ks-pass env:FL_STORE_PASS --ks-key-alias "$FL_KEY_ALIAS" --key-pass env:FL_KEY_PASS
           for f in StayFocused.apk StayFocused-Full.apk; do
-            "$AS" sign --ks "$FL_KEYSTORE" --ks-pass env:FL_STORE_PASS --ks-key-alias "$FL_KEY_ALIAS" --key-pass env:FL_KEY_PASS --lineage "$RUNNER_TEMP/lineage.bin" "$f"
+            "$AS" sign --ks "$FL_KEYSTORE" --ks-pass env:FL_STORE_PASS --ks-key-alias "$FL_KEY_ALIAS" --key-pass env:FL_KEY_PASS --lineage "$RUNNER_TEMP/lineage.bin" --min-sdk-version 27 --v1-signing-enabled false --v2-signing-enabled true --v3-signing-enabled true "$f"
             "$AS" verify --min-sdk-version 27 -v --print-certs "$f" | head -30
           done
       - name: Read version
