@@ -17,10 +17,12 @@ jobs:
         env:
           KS: ${{ secrets.KEYSTORE_B64 }}
         run: |
-          if [ -n "$KS" ]; then
-            echo "$KS" | base64 -d > "$RUNNER_TEMP/release.jks"
-            echo "FL_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          if [ -z "$KS" ] || [ -z "$FL_STORE_PASS" ] || [ -z "$FL_KEY_ALIAS" ] || [ -z "$FL_KEY_PASS" ]; then
+            echo "::error::Signing secrets are missing (KEYSTORE_B64, FL_STORE_PASS, FL_KEY_ALIAS, FL_KEY_PASS). Refusing to build with the public key."
+            exit 1
           fi
+          echo "$KS" | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "FL_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -28,18 +30,13 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.7"
-      - name: Build both editions (release, fallback to debug)
+      - name: Build both editions (release only)
         working-directory: FocusLock
         run: |
-          if gradle assembleLiteRelease assembleFullRelease; then
-            cp app/build/outputs/apk/lite/release/app-lite-release.apk ../StayFocused.apk
-            cp app/build/outputs/apk/full/release/app-full-release.apk ../StayFocused-Full.apk
-          else
-            echo "Release build failed, falling back to debug"
-            gradle assembleLiteDebug assembleFullDebug
-            cp app/build/outputs/apk/lite/debug/app-lite-debug.apk ../StayFocused.apk
-            cp app/build/outputs/apk/full/debug/app-full-debug.apk ../StayFocused-Full.apk
-          fi
+          set -e
+          gradle assembleLiteRelease assembleFullRelease
+          cp app/build/outputs/apk/lite/release/app-lite-release.apk ../StayFocused.apk
+          cp app/build/outputs/apk/full/release/app-full-release.apk ../StayFocused-Full.apk
       - name: Re-sign with key rotation (keeps existing users and their data)
         if: env.FL_KEYSTORE != ''
         run: |
@@ -70,4 +67,5 @@ jobs:
         run: |
           NOTES=FocusLock/RELEASE_NOTES.txt
           [ -f "$NOTES" ] || echo "Vigil $VER" > "$NOTES"
+          { echo; echo "SHA-256:"; sha256sum StayFocused.apk StayFocused-Full.apk; } >> "$NOTES"
           gh release view "v$VER" >/dev/null 2>&1 || gh release create "v$VER" StayFocused-Full.apk StayFocused.apk --title "Vigil $VER" --notes-file "$NOTES" --latest
