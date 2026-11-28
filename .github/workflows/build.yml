@@ -1,14 +1,38 @@
 name: Build APK
-on: [push, workflow_dispatch]
+# أثناء التطوير: هذا الـworkflow يبني ويرفع APK كـ artifact فقط، ولا ينشر شيئًا أبدًا (لا عند push ولا عند دفع وسم).
+# لا يوجد مشغّل بوسوم v* عمدًا. النشر العام ممكن فقط عبر وظيفة "publish" المنفصلة، وتشترط معًا:
+#   (1) تشغيلًا يدويًا (workflow_dispatch) مع publish_release=true،
+#   (2) كتابة PUBLISH في خانة confirm،
+#   (3) متغيّر المستودع ALLOW_PUBLIC_RELEASE=true (Settings > Secrets and variables > Actions > Variables)،
+#   (4) نجاح الاختبارات، وتطابق الإصدار، وعدم وجود إصدار بنفس الاسم.
+# المتغيّر غير مضبوط افتراضيًا، فيبقى النشر مغلقًا حتى تُفعّله أنت عمدًا عند تجهيز الإصدار النهائي (انظر DECISIONS.md).
+on:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: 'نشر إصدار عام (لا يعمل إلا مع confirm=PUBLISH والمتغيّر ALLOW_PUBLIC_RELEASE=true). اتركه مغلقًا للبناء فقط'
+        type: boolean
+        default: false
+      confirm:
+        description: 'اكتب PUBLISH للتأكيد (للنشر فقط)'
+        type: string
+        default: ''
 permissions:
-  contents: write
-env:
-  FL_STORE_PASS: ${{ secrets.FL_STORE_PASS }}
-  FL_KEY_ALIAS: ${{ secrets.FL_KEY_ALIAS }}
-  FL_KEY_PASS: ${{ secrets.FL_KEY_PASS }}
+  contents: read
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      FL_STORE_PASS: ${{ secrets.FL_STORE_PASS }}
+      FL_KEY_ALIAS: ${{ secrets.FL_KEY_ALIAS }}
+      FL_KEY_PASS: ${{ secrets.FL_KEY_PASS }}
+    outputs:
+      ver: ${{ steps.ver.outputs.ver }}
+      tests: ${{ steps.tests.outcome }}
     steps:
       - uses: actions/checkout@v4
       - name: Unzip project
@@ -30,6 +54,11 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.7"
+      - name: Unit tests (informational for normal builds; must pass to publish a release)
+        id: tests
+        working-directory: FocusLock
+        continue-on-error: true
+        run: gradle testLiteDebugUnitTest --no-daemon
       - name: Build both editions (release only)
         working-directory: FocusLock
         run: |
@@ -53,19 +82,48 @@ jobs:
             "$AS" verify --min-sdk-version 27 -v --print-certs "$f" | head -30
           done
       - name: Read version
-        run: echo "VER=$(grep -oP 'versionName = "\K[^"]+' FocusLock/app/build.gradle.kts)" >> "$GITHUB_ENV"
+        id: ver
+        run: |
+          VER=$(grep -oP 'versionName = "\K[^"]+' FocusLock/app/build.gradle.kts)
+          echo "VER=$VER" >> "$GITHUB_ENV"
+          echo "ver=$VER" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
           name: FocusLock-apk
           path: |
             StayFocused.apk
             StayFocused-Full.apk
-      - name: Publish release for new versions
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
+  publish:
+    # الوظيفة الوحيدة ذات صلاحية الكتابة. لا تعمل إلا بكل الشروط معًا (انظر أعلى الملف)
+    needs: build
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.publish_release == true &&
+      inputs.confirm == 'PUBLISH' &&
+      vars.ALLOW_PUBLIC_RELEASE == 'true' &&
+      needs.build.outputs.tests == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VER: ${{ needs.build.outputs.ver }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unzip project (release notes)
+        run: if [ -f FocusLock.zip ]; then unzip -oq FocusLock.zip; fi
+      - uses: actions/download-artifact@v4
+        with:
+          name: FocusLock-apk
+      - name: Publish public release
         run: |
+          if [ -z "$VER" ]; then echo "::error::Missing version; refusing to publish."; exit 1; fi
+          if gh release view "v$VER" >/dev/null 2>&1; then
+            echo "::error::Release v$VER already exists; bump versionName instead of overwriting a public release."
+            exit 1
+          fi
           NOTES=FocusLock/RELEASE_NOTES.txt
           [ -f "$NOTES" ] || echo "Vigil $VER" > "$NOTES"
           { echo; echo "SHA-256:"; sha256sum StayFocused.apk StayFocused-Full.apk; } >> "$NOTES"
-          gh release view "v$VER" >/dev/null 2>&1 || gh release create "v$VER" StayFocused-Full.apk StayFocused.apk --title "Vigil $VER" --notes-file "$NOTES" --latest
+          gh release create "v$VER" StayFocused-Full.apk StayFocused.apk --title "Vigil $VER" --notes-file "$NOTES" --latest
